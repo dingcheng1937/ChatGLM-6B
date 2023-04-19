@@ -1,6 +1,7 @@
+from fastapi import FastAPI, Request
+import uvicorn, json, datetime
 from langchain import PromptTemplate
 from langchain.chains import RetrievalQA
-from langchain.llms import OpenAI
 from langchain.embeddings.huggingface import \
     HuggingFaceEmbeddings
 from langchain.vectorstores import FAISS
@@ -13,6 +14,46 @@ import requests
 import re
 from plugins import settings
 from langchain.schema import Document
+
+app = FastAPI()
+# Global Parameters
+
+
+
+@app.on_event("startup")
+def init_cfg():
+    global chatglm, embeddings, vector_store,\
+        VECTOR_SEARCH_TOP_K
+    EMBEDDING_MODEL = "text2vec"
+    VECTOR_SEARCH_TOP_K = 3
+    LLM_HISTORY_LEN = 3
+    LLM_MODEL = "chatglm-6b"
+    DEVICE = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+
+    embedding_model_dict = {
+        "text2vec": "GanymedeNil/text2vec-large-chinese",
+    }
+
+    llm_model_dict = {
+        "chatglm-6b": "THUDM/chatglm-6b",
+    }
+    embeddings = HuggingFaceEmbeddings(
+        model_name=embedding_model_dict[EMBEDDING_MODEL], )
+    embeddings.client = sentence_transformers.SentenceTransformer(
+        embeddings.model_name, device=DEVICE)
+
+    chatglm = ChatGLM()
+    chatglm.load_model(model_name_or_path=llm_model_dict[LLM_MODEL])
+    chatglm.history_len = LLM_HISTORY_LEN
+
+    loader = UnstructuredFileLoader("output2.txt",
+                                    mode="elements")
+    docs = []
+    docs += loader.load()
+    vector_store = FAISS.from_documents(docs, embeddings)
+
+
+
 
 session = requests.Session()
 # 正则提取摘要和链接
@@ -60,47 +101,8 @@ def find(search_query, headers=headers, proxies=proxies):
             range(min(settings.chunk_count, len(brief)))]
 
 
-# Global Parameters
-EMBEDDING_MODEL = "text2vec"
-VECTOR_SEARCH_TOP_K = 3
-LLM_MODEL = "chatglm-6b"
-LLM_HISTORY_LEN = 3
-DEVICE = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
-
-# Show reply with source text from input document
-REPLY_WITH_SOURCE = True
-
-embedding_model_dict = {
-    "ernie-tiny": "nghuyong/ernie-3.0-nano-zh",
-    "ernie-base": "nghuyong/ernie-3.0-base-zh",
-    "text2vec": "GanymedeNil/text2vec-large-chinese",
-}
-
-llm_model_dict = {
-    "chatglm-6b-int4-qe": "./model/chatglm-6b-int4-qe",
-    "chatglm-6b-int4": "./model/chatglm-6b-int4",
-    "chatglm-6b": "THUDM/chatglm-6b",
-}
-
-
-def init_cfg(LLM_MODEL, EMBEDDING_MODEL, LLM_HISTORY_LEN,
-             V_SEARCH_TOP_K=6):
-    global chatglm, embeddings, VECTOR_SEARCH_TOP_K
-    VECTOR_SEARCH_TOP_K = V_SEARCH_TOP_K
-
-    embeddings = HuggingFaceEmbeddings(
-        model_name=embedding_model_dict[EMBEDDING_MODEL], )
-    embeddings.client = sentence_transformers.SentenceTransformer(
-        embeddings.model_name, device=DEVICE)
-
-    chatglm = ChatGLM()
-    chatglm.load_model(
-        model_name_or_path=llm_model_dict[LLM_MODEL])
-    chatglm.history_len = LLM_HISTORY_LEN
-
-
-def AskLLM(query, vector_store):
-    global chatglm, embeddings
+def AskLLM(query, chat_history=[]):
+    global chatglm, embeddings, vector_store
 
     # Prompt template for knowledge chain
     prompt_template = """基于以下已知信息，请扮演小雀儿来回答。
@@ -116,21 +118,20 @@ def AskLLM(query, vector_store):
     prompt = PromptTemplate(template=prompt_template,
                             input_variables=["context",
                                              "question"])
-
-    # print(vector_store)
+    chatglm.history = chat_history
     # Fetch the searchtool result
     search_result = find(query)
-    # print(search_result)
     documents = [Document(page_content=result['content'])
                  for result in search_result]
-    vector_store.add_documents(documents)
+    vector_store_tmp = vector_store
+    vector_store_tmp.add_documents(documents)
 
     # Update the retriever in knowledge_chain with the new vector store
 
     # Instantiate the knowledge chain
     knowledge_chain = RetrievalQA.from_llm(
         llm=chatglm,
-        retriever=vector_store.as_retriever(
+        retriever=vector_store_tmp.as_retriever(
             search_kwargs={"k": VECTOR_SEARCH_TOP_K}),
         prompt=prompt,
     )
@@ -145,44 +146,33 @@ def AskLLM(query, vector_store):
 
     # Call the knowledge chain with a query
     result = knowledge_chain({"query": query})
+    chatglm.history[-1][0] = query
+    return result, chatglm.history
 
-    # Print the response
-    # print(f"debug: {result}")
-    # print(f"提问： {result['query']}, 回答： {result['result']}")
-    print(f"[debug] search result: {search_result}\n")
-    return result
+@app.post("/")
+async def create_item(request: Request):
+    json_post_raw = await request.json()
+    json_post = json.dumps(json_post_raw)
+    json_post_list = json.loads(json_post)
+    prompt = json_post_list.get('prompt')
+    history = json_post_list.get('history')
+    log = "[" + "] " + '", prompt:"' + prompt + '", history:"' + repr(history) + '"'
+    print(log)
+    result, history = AskLLM(prompt, history)
+    response = result['result']
+    now = datetime.datetime.now()
+    time = now.strftime("%Y-%m-%d %H:%M:%S")
+    answer = {
+        "response": response,
+        "history": history,
+        "status": 200,
+        "time": time
+    }
+    log = "[" + time + "] " + '", prompt:"' + prompt + '", response:"' + repr(response) + '"'
+    print(log)
+    return answer
 
-def debugVS(vector_store):
-    for doc_id, doc in vector_store.docstore.doc_dict.items():
-        print(doc_id, doc)
 
-
-
-init_cfg(LLM_MODEL, EMBEDDING_MODEL, LLM_HISTORY_LEN)
-loader = UnstructuredFileLoader("output2.txt",
-                                mode="elements")
-docs = []
-docs += loader.load()
-vector_store = FAISS.from_documents(docs, embeddings)
-#debugVS(vector_store)
-# print(find("How to learn Python?"))
-search_query = "今天几月几号?"
-QueryList1 = ["原神",
-              "神里绫华",
-              "今天上海星期几?",
-              "今天几月几号?",
-              "今天上海天气如何?",
-
-              "你是谁?",
-              "你来自哪里",
-              "讲个冷笑话",
-              "你好可爱",
-              "我不喜欢你"]
-for query in QueryList1:
-    print(f"[用户]提问：{query}\n")
-    resp = AskLLM(query, vector_store)
-    print(f"[小雀儿]回答：{resp['result']}\n")
-while True:
-    query = input("[用户]Input your question 请输入问题：")
-    resp = AskLLM(query, vector_store)
-    print(f"[小雀儿]回答：{resp['result']}\n")
+if __name__ == '__main__':
+    uvicorn.run('chatglm_server:app', host='0.0.0.0',
+                port=8000, workers=1)
