@@ -125,7 +125,7 @@ def AskLLM(query, chat_history=[]):
                  for result in search_result]
     vector_store_tmp = vector_store
     vector_store_tmp.add_documents(documents)
-
+    #print(f"[debug] search result: {search_result}\n")
     # Update the retriever in knowledge_chain with the new vector store
 
     # Instantiate the knowledge chain

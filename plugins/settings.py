@@ -1,7 +1,7 @@
 import os
 
 port = '17860'
-print('WebUI 端口号', port)
+#print('WebUI 端口号', port)
 
 red = "\033[1;32m"
 green = "\033[1;31m"
@@ -39,12 +39,12 @@ if llm_type == "glm6b":
 
 
 logging = os.environ.get('logging') != "0"
-print('日志记录', logging)
+#print('日志记录', logging)
 
 zsk_type = 'bing'
-print('知识库类型', zsk_type)
+#print('知识库类型', zsk_type)
 zsk_show_soucre = os.environ.get('zsk_show_soucre')!="0"
-print('知识库显示来源', zsk_show_soucre)
+#print('知识库显示来源', zsk_show_soucre)
 if zsk_type == 'x':
     embeddings_path = os.environ.get('embeddings_path')
     print('embeddings模型地址', embeddings_path)
@@ -71,4 +71,4 @@ chunk_count = 1
 print('chunk_count', chunk_count)
 
 zhishiku_folder_name = os.environ.get('zsk_folder', "txt")
-print('知识库文件夹名称为:', zhishiku_folder_name)
+#print('知识库文件夹名称为:', zhishiku_folder_name)
