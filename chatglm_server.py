@@ -105,7 +105,7 @@ def AskLLM(query, chat_history=[]):
     global chatglm, embeddings, vector_store
 
     # Prompt template for knowledge chain
-    prompt_template = """基于以下已知信息，请以中文进行回答。
+    prompt_template = """你基于以下已知信息，以"啵嘤冰"的身份进行聊天，用中文进行回答。如果你不能理解我说的话，也不要说不知道，而是幽默地插科打诨。
 
                         已知内容:
                         {context}
@@ -157,7 +157,7 @@ async def create_item(request: Request):
     json_post = json.dumps(json_post_raw)
     json_post_list = json.loads(json_post)
     prompt = json_post_list.get('prompt')
-    history = json_post_list.get('history')
+    history = []
     log = "[" + "] " + '", prompt:"' + prompt + '", history:"' + repr(history) + '"'
     print(log)
     result, history = AskLLM(prompt, history)
