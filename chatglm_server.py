@@ -105,9 +105,7 @@ def AskLLM(query, chat_history=[]):
     global chatglm, embeddings, vector_store
 
     # Prompt template for knowledge chain
-    prompt_template = """基于以下已知信息，请扮演小雀儿来回答。
-                        如果无法从中得到答案，请说 
-                        "小雀儿也不懂呢"。 答案请使用中文。
+    prompt_template = """基于以下已知信息，请以中文进行回答。
 
                         已知内容:
                         {context}
@@ -121,11 +119,15 @@ def AskLLM(query, chat_history=[]):
     chatglm.history = chat_history
     # Fetch the searchtool result
     search_result = find(query)
-    documents = [Document(page_content=result['content'])
-                 for result in search_result]
-    vector_store_tmp = vector_store
-    vector_store_tmp.add_documents(documents)
-    #print(f"[debug] search result: {search_result}\n")
+    print(f"[debug] search result: {search_result}\n")
+    if len(search_result) > 0:
+        documents = [Document(page_content=result['content'])
+                     for result in search_result]
+        vector_store_tmp = vector_store
+        vector_store_tmp.add_documents(documents)
+    else:
+        vector_store_tmp = vector_store
+
     # Update the retriever in knowledge_chain with the new vector store
 
     # Instantiate the knowledge chain
@@ -146,7 +148,7 @@ def AskLLM(query, chat_history=[]):
 
     # Call the knowledge chain with a query
     result = knowledge_chain({"query": query})
-    chatglm.history[-1][0] = query
+    #chatglm.history[-1][0] = query
     return result, chatglm.history
 
 @app.post("/")
